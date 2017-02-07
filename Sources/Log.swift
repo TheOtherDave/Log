@@ -1,38 +1,27 @@
 import Foundation
 
 /// A "medium weight" class for logging things. It's a bit more structured than a `Dictionary`, but not as powerful as a full database (and likely less efficient). It's a wrapper for [Date : Value], with some added functionality for tagging entries.
-public class Log<Value: Equatable> : ExpressibleByDictionaryLiteral, Collection {
-    public typealias Index = Date
+public class Log<Value: Equatable&CustomStringConvertible> : ExpressibleByDictionaryLiteral {
     
-    // TODO: Actually implement this
-    public static func == (lhs: Log, rhs: Log) -> Bool {
-        return lhs === rhs
-//        guard lhs.logbook.count == rhs.logbook.count else { return false }
-//        guard lhs.tagsForKey.count == rhs.logbook.count else { return false }
-//        guard lhs.logbook.count == rhs.logbook.count else { return false }
-//        return
-    }
+    // FIXME: Actually implement this
+    public static func == (lhs: Log, rhs: Log) -> Bool { return lhs === rhs }
     
     // MARK: - Book-Keeping stuff
-    fileprivate private(set) var _keys: [Date] = []
-    fileprivate private(set) var _tags: [String] = []
+    fileprivate private(set) var _keys: Set<Date> = []
+    fileprivate private(set) var _tags: Set<String> = []
+     private(set) var _lastDate: Date? = nil
     
     // MARK: - Private Storage
-    private var tagsForKey: [Date : Set<Tag>] = [:]
-    private var keysForTag: [Tag : Set<Date>] = [:]
-    private var logbook: [Date : Value] = [:]
+    fileprivate var logbook: [Date : Value] = [:]
     private var indexForFirstEntry: Date?
     private var indexForLastEntry: Date?
 
     // MARK: - Public Properties
-    public let creationDate = Date()
-    
-    // MARK: - Collection Conformance
-    public var startIndex: Index { return _keys[_keys.startIndex] }
-    public var endIndex: Index { return _keys[_keys.endIndex] }
-    public var count: Int { return _keys.count }
-    public func index(after i: Date) -> Date {
-        return _keys[_keys.index(of: i)! + 1]
+    public var count: Int { return logbook.count }
+    public var tagsForKey: [Date : Set<String>] = [:]
+    public var keysForTag: [String : Set<Date>] = [:]
+    public var last: Entry<Value>? {
+        return _lastDate == nil ? nil : self[_lastDate!]
     }
     
     // MARK: - inits
@@ -45,70 +34,145 @@ public class Log<Value: Equatable> : ExpressibleByDictionaryLiteral, Collection 
     
     // MARK: - Public Accessors
     /// We specifically do _not_ provide a setter for keys because Logs are intended to be "update-only" types.
-    public subscript(_ key: Date) -> Value? { return logbook[key] }
+    public subscript(_ key: Date) -> Entry<Value>? {
+        return Entry(key: key, tags: tagsForKey[key], entry: logbook[key], log: self)
+    }
+    public subscript(_ tag: String) -> Set<Entry<Value>> {
+        return Set((keysForTag[tag] ?? []).flatMap {self[$0]})
+    }
 
-    subscript(tagsFor key: Date) -> Set<Tag>? {
-        get { return tagsForKey[key] }
+    public subscript(tagsFor key: Date) -> Set<String> {
+        get { return tagsForKey[key] ?? [] }
         set { tagsForKey[key] = newValue }
     }
-    subscript(keysFor tag: Tag) -> Set<Date>? {
-        get { return keysForTag[tag] }
-        set { keysForTag[tag] = newValue }
-    }
-    subscript(keysFor tag: Tag?) -> Set<Date> { return tag == nil ? [] : keysForTag[tag!] ?? [] }
-    subscript(tag: String) -> [Entry<Date, Value>] {
-        return (keysForTag[Tag(tag)] ?? [])
-            .map { Entry(key: $0, tags: Array(tagsForKey[$0] ?? []), value: logbook[$0]!) }
-    }
-    subscript() -> Value? {
-        get {return nil}
-        set {if let nv = newValue { logbook[Date()] = nv } }
-    }
-    subscript() -> (tags: [String], entry: Value)? {
-        get {return nil}
+    
+    // MARK: - Adding new entries/tags
+    public subscript() -> Value {
+        get {fatalError()}
         set {
-            if let nv = newValue {
-                let key = Date()
-                logbook[key] = nv.entry
-                tagsForKey[key]?.formUnion(nv.tags.map {Tag($0)})
-            }
+            let key = Date()
+            logbook[key] = newValue
+            _keys.insert(key)
+            _lastDate = key
         }
     }
-    func tag(keys: Date..., with tagStr: String) {
-        let tag = Tag(tagStr)
+    public subscript() -> (entry: Value, tag: String) {
+        get {fatalError()}
+        set { self[] = (entry: newValue.entry, tags: [newValue.tag]) }
+    }
+    public subscript() -> (entry: Value, tags: [String]) {
+        get {fatalError()}
+        set {
+            let key = Date()
+            logbook[key] = newValue.entry
+            var oldTags = (tagsForKey[key] ?? [])
+            newValue.tags.forEach { oldTags.insert($0) }
+            tagsForKey[key] = oldTags
+            _keys.insert(key)
+            _lastDate = key
+        }
+    }
+    public func newEntry(_ entry: Value, withTags tags: String...) {
+        newEntry(entry, withTags: tags)
+    }
+    public func newEntry(_ entry: Value, withTags tags: [String]) {
+        let key = Date()
+        logbook[key] = entry
+        _keys.insert(key)
+        _lastDate = key
+        self[tagsFor: key].formUnion(tags.map {$0})
+    }
+    public func tag(_ message: String...) {
+        tag(message)
+    }
+    public func tag(_ message: [String]) {
+        guard let _lastDate = _lastDate else { return }
+        tag(key: _lastDate, message)
+    }
+    public func tag(key: Date, _ message: String...) {
+        tag(key: key, message)
+    }
+    public func tag(key: Date, _ message: [String]) {
+        tagsForKey[key] = (tagsForKey[key] ?? []).union(message)
+    }
+    func tag(_ keys: Date..., with tagStr: String) {
+        tag(keys, with: tagStr)
+    }
+    func tag(_ keys: [Date], with tag: String) {
         keysForTag[tag]?.formUnion(keys)
+        for key in keys {
+            self[tagsFor: key].formUnion([tag])
+        }
     }
-}
-
-// MARK: - Hashable
-extension Log : Hashable {
-    public var hashValue: Int { return creationDate.hashValue ^ _keys.count }
+    public func update(tags: String..., forKey: Date) {
+        
+    }
+    public func update(tags: Set<String>, forKey: Date) {
+        
+    }
     
-}
-
-// MARK: - Expressible
-extension Log  {
-    /// Returns an iterator over the elements of this sequence.
-}
-
-// TODO: Make this conformance condition on `Entry` conforming
-extension Log : CustomStringConvertible {
-    public var description: String {
-        return ""
-    }
+//    func tag(_ key: Date, with tagStr: String...) {
+//        tag(key, with: tagStr)
+//    }
+//    func tag(_ key: Date, with tagStr: [String]) {
+//        let tag = Tag(tagStr)
+//        tags
+//    }
 }
 
 // MARK: - Convenince Accessor Methods
 // They're in an extension rather than the base declaration to ensure that they go through an existing public accessor and don't mess with the storage directly
 extension Log {
-    public subscript(_ key: Date?) -> Value? { return key == nil ? nil : self[key!] }
     public subscript(_ keys: [Date]) -> [Value] { return keys.flatMap { self[$0] } }
     public subscript(_ keys: Date...) -> [Value] { return self[keys] }
-    public subscript(_ keys: [Date?]) -> [Value] { return keys.flatMap { self[$0] } }
-    public subscript(_ keys: Date?...) -> [Value] { return self[keys] }
+    public subscript(checking keys: [Date?]) -> [Value] { return keys.flatMap { self[checking: $0] } }
+    public subscript(checking keys: Date?...) -> [Value] { return self[checking: keys] }
     
-    public subscript(tagsFor key: Date?) -> Set<Tag>? {
+    public subscript(checking_tagsFor key: Date?) -> Set<String>? {
         get { return key == nil ? nil : self[tagsFor: key!] }
-        set { if let key = key { self[tagsFor: key] = newValue } }
+        set { if let key = key, let nv = newValue { self[tagsFor: key] = nv } }
+    }
+}
+
+// MARK: - Hashable Conformance
+extension Log : Hashable {
+    public var hashValue: Int { return _keys.reduce(0) {$0.hashValue ^ $1.hashValue} }
+}
+
+
+// MARK: - CustomStringConvertible Conformance
+// TODO: Make this conformance condition on `Entry` conforming
+extension Log : CustomStringConvertible {
+    public var description: String {
+        return self
+            .map { $0.description }
+            .joined(separator: "\n")
+    }
+}
+
+// MARK: - Sequence Conformance
+extension Log : Sequence {
+    public typealias Index = Date
+    public typealias Iterator = LogIterator<Value>
+    
+    public func makeIterator() -> Iterator {
+        return Iterator(self)
+    }
+}
+
+public struct LogIterator<Value: Equatable&CustomStringConvertible> : IteratorProtocol {
+    public typealias Element = Array<Entry<Value>>.Iterator.Element
+    
+    private var log: Log<Value>
+    private lazy var iterator: SetIterator<Date> = {
+        return self.log._keys.makeIterator()
+    }()
+    init(_ log: Log<Value>) {
+        self.log = log
+    }
+    public mutating func next() -> Entry<Value>? {
+        let nxt = iterator.next()
+        let entry = nxt == nil ? nil : log[nxt!]
+        return entry
     }
 }
