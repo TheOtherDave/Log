@@ -2,10 +2,11 @@ import XCTest
 @testable import Log
 
 class LogTests: XCTestCase {
+    // FIXME: This essentially just tests that we can compile... It's seriously useless.
     func testExample() {
         // This is an example of a functional test case.
         // Use XCTAssert and related functions to verify your tests produce the correct results.
-        XCTAssertNotEqual("\(Log())", "Hello, World!")
+        XCTAssert("\(Log())" != "Hello, World!")
     }
 
 
